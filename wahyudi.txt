@@ -1,1 +1,31 @@
-Wahyudi Setya Pradhana
+from flask import Flask, request, jsonify
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+app = Flask(__name__)
+
+# Contoh database produk
+products = [
+    {"id": 1, "name": "AC Split A", "capacity": 1.5, "efficiency": 3.5},
+    {"id": 2, "name": "AC Split B", "capacity": 2.0, "efficiency": 4.0},
+    # Tambahkan produk lainnya
+]
+
+@app.route('/recommend', methods=['POST'])
+def recommend():
+    user_input = request.json
+    user_capacity = user_input.get("capacity")
+    
+    # Menghitung kemiripan berdasarkan kapasitas
+    similarities = []
+    for product in products:
+        similarity = cosine_similarity([[user_capacity]], [[product["capacity"]]])[0][0]
+        similarities.append((product["name"], similarity))
+    
+    # Mengurutkan produk berdasarkan kemiripan
+    recommendations = sorted(similarities, key=lambda x: x[1], reverse=True)
+    
+    return jsonify(recommendations)
+
+if __name__ == '__main__':
+    app.run(debug=True)
