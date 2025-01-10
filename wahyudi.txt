@@ -1,31 +1,72 @@
-from flask import Flask, request, jsonify
-import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from joblib import Parallel, delayed
+import numpy as np
+import pandas as pd
 
-app = Flask(__name__)
+# Data produk: fitur-fitur produk AC (contoh data)
+product_data = pd.DataFrame({
+    'ID': [1, 2, 3],
+    'BTU': [12000, 18000, 9000],
+    'Energy_Rating': [5, 3, 4],
+    'Price': [4000000, 6000000, 3500000],
+    'Brand': ['Brand A', 'Brand B', 'Brand A']
+})
 
-# Contoh database produk
-products = [
-    {"id": 1, "name": "AC Split A", "capacity": 1.5, "efficiency": 3.5},
-    {"id": 2, "name": "AC Split B", "capacity": 2.0, "efficiency": 4.0},
-    # Tambahkan produk lainnya
-]
+# Preferensi pengguna (contoh input dari user)
+user_preference = {
+    'BTU': 12000,  # Kapasitas BTU yang diinginkan
+    'Energy_Rating': 5,  # Preferensi hemat energi
+    'Price_Range': (3000000, 5000000),  # Harga yang diinginkan
+    'Preferred_Brand': 'Brand A'  # Merek favorit
+}
 
-@app.route('/recommend', methods=['POST'])
-def recommend():
-    user_input = request.json
-    user_capacity = user_input.get("capacity")
+# Content-Based Filtering
+def calculate_similarity(product, preference):
+    product_features = np.array([product['BTU'], product['Energy_Rating']])
+    user_features = np.array([preference['BTU'], preference['Energy_Rating']])
+    similarity = cosine_similarity([product_features], [user_features])[0][0]
+    return product['ID'], similarity
+
+# Knowledge-Based Filtering
+def knowledge_filter(product, preference):
+    matches = (
+        preference['Price_Range'][0] <= product['Price'] <= preference['Price_Range'][1] and
+        product['Brand'] == preference['Preferred_Brand']
+    )
+    return product['ID'], matches
+
+# Parallel execution
+def parallel_recommendation(products, preference):
+    # Content-Based
+    cbf_results = Parallel(n_jobs=-1)(
+        delayed(calculate_similarity)(row, preference) for _, row in products.iterrows()
+    )
     
-    # Menghitung kemiripan berdasarkan kapasitas
-    similarities = []
-    for product in products:
-        similarity = cosine_similarity([[user_capacity]], [[product["capacity"]]])[0][0]
-        similarities.append((product["name"], similarity))
+    # Knowledge-Based
+    kbf_results = Parallel(n_jobs=-1)(
+        delayed(knowledge_filter)(row, preference) for _, row in products.iterrows()
+    )
     
-    # Mengurutkan produk berdasarkan kemiripan
-    recommendations = sorted(similarities, key=lambda x: x[1], reverse=True)
+    # Combine results
+    cbf_scores = {result[0]: result[1] for result in cbf_results}
+    kbf_matches = {result[0]: result[1] for result in kbf_results}
     
-    return jsonify(recommendations)
+    # Hybrid scoring
+    final_scores = {
+        product_id: cbf_scores.get(product_id, 0) + (1 if kbf_matches.get(product_id, False) else 0)
+        for product_id in products['ID']
+    }
+    return final_scores
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# Execute recommendation
+recommendations = parallel_recommendation(product_data, user_preference)
+
+# Sort recommendations
+sorted_recommendations = sorted(recommendations.items(), key=lambda x: x[1], reverse=True)
+print("Recommendations (ID and Score):", sorted_recommendations)
+
+# Get recommended products
+recommended_products = product_data[product_data['ID'].isin([rec[0] for rec in sorted_recommendations])]
+print("\nRecommended Products:")
+print(recommended_products)
+
